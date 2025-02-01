@@ -24,16 +24,18 @@
 // This software serial library is intended as a more-efficient replacement
 // for SoftwareSerial at baud rates 9600, 19200 and 38400.
 //
-// Any of the pins supported by SoftwareSerial may be used.  Pins (0-19) 
-// on the Uno may be used.  Other boards can use any of the pins 
-// allowed by digitalPinToPCMSK in pins_arduino.h
+// Any of the pins supported by SoftwareSerial may be used.  Pins (0-19)
+// on the Uno may be used.  Other boards can use any of the pins
+// allowed by digitalPinToPCMSK in pins_arduino.h.
+// Explanation PCMSKx -> a register that stores the state (enabled/disabled)
+// of pin change interrupts for a single pin
 //
 // This code uses a pin change interrupt on the selected RX pin.
 // Transmission on the TX line is done in a loop with interrupts disabled.
 // Both RX and TX read timer0 for determining elapsed time. Timer0 itself is
 // not reprogrammed; it is assumed to be running with a 4 microsecond step.
 //
-// By default NeoSWSerial defines handlers for all PCINT interrupts like
+// By default NeoSWSerial defines handlers for all PCINT (pin change) interrupts like
 // SoftwareSerial. If client code requires own pin change interrupt handlers,
 // it's possible to rebuild library with #define NEOSWSERIAL_EXTERNAL_PCINT.
 // In such case client code should call NeoSWSerial::rxISR(PINB) (assuming
@@ -42,9 +44,9 @@
 // Supported baud rates are 9600 (default), 19200 and 38400.
 // The baud rate is selectable at run time.
 //
-// The size of the RX buffer may be changed by editing the 
-// accompanying .cpp file. For optimal performance of the interrupt 
-// service routines, the buffer size should be chosen to be a 
+// The size of the RX buffer may be changed by editing the
+// accompanying .cpp file. For optimal performance of the interrupt
+// service routines, the buffer size should be chosen to be a
 // power of 2 (i.e., 2, 4, 8, 16, 32, 64,...).
 //
 // v1.0   Nov 2014 jboyton   - Created
@@ -59,43 +61,43 @@
 // v2.3   Mar 2017 SlashDev  - Add GPL
 // v3.0.0 May 2017 SlashDev  - Convert to new Arduino IDE library
 
-class NeoSWSerial : public Stream
+class NeoSWSerial : public Stream // Stream is the base class for character and binary based streams.
 {
-  NeoSWSerial( const NeoSWSerial & ); // Not allowed
-  NeoSWSerial & operator =( const NeoSWSerial & ); // Not allowed
+  NeoSWSerial(const NeoSWSerial &);            // Not allowed. Copy constructor -> from existing objects copy content to new one
+  NeoSWSerial &operator=(const NeoSWSerial &); // Not allowed. Some operator overload.
 
 public:
   NeoSWSerial(uint8_t receivePin, uint8_t transmitPin)
-    {
-      rxPin = receivePin;
-      txPin = transmitPin;
-      _isr  = (isr_t) NULL;
-    }
+  {
+    rxPin = receivePin;
+    txPin = transmitPin;
+    _isr = (isr_t)NULL; // interrupt service rutine
+  }
 
-          void   begin(uint16_t baudRate=9600);   // initialize, set baudrate, listen
-          void   listen();                        // enable RX interrupts
-          void   ignore();                        // disable RX interrupts
-          void   setBaudRate(uint16_t baudRate);  // 9600 [default], 19200, 38400
-  virtual int    available();
-  virtual int    read();
+  void begin(uint16_t baudRate = 9600); // initialize, set baudrate, listen
+  void listen();                        // enable RX interrupts
+  void ignore();                        // disable RX interrupts
+  void setBaudRate(uint16_t baudRate);  // 9600 [default], 19200, 38400
+  virtual int available();              //  virtul = member function that is declared within a base class and is re-defined (overridden) by a derived class
+  virtual int read();
   virtual size_t write(uint8_t txChar);
   using Stream::write; // make the base class overloads visible
-  virtual int    peek() { return 0; };
-  virtual void   flush() {};
-          void   end() { ignore(); }
+  virtual int peek() { return 0; };
+  virtual void flush() {};
+  void end() { ignore(); }
 
-  typedef void (* isr_t)( uint8_t );
-  void attachInterrupt( isr_t fn );
-  void detachInterrupt() { attachInterrupt( (isr_t) NULL ); };
+  typedef void (*isr_t)(uint8_t);
+  void attachInterrupt(isr_t fn);
+  void detachInterrupt() { attachInterrupt((isr_t)NULL); };
 
 private:
-           uint8_t  rxPin, txPin;
+  uint8_t rxPin, txPin;
   volatile uint8_t *rxPort;
 
   uint16_t _baudRate;
-  isr_t    _isr;
+  isr_t _isr;
 
-  static void rxChar( uint8_t rx ); // buffer or dispatch one received character
+  static void rxChar(uint8_t rx); // buffer or dispatch one received character
 
   bool checkRxTime();
 
@@ -103,8 +105,8 @@ private:
 
 public:
   // visible only so the ISRs can call it...
-  static void rxISR( uint8_t port_input_register );
+  static void rxISR(uint8_t port_input_register);
 
-  //#define NEOSWSERIAL_EXTERNAL_PCINT // uncomment to use your own PCINT ISRs
+  // #define NEOSWSERIAL_EXTERNAL_PCINT // uncomment to use your own PCINT ISRs
 };
 #endif
