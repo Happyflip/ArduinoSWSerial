@@ -78,7 +78,7 @@ public:
   void listen();                        // enable RX interrupts
   void ignore();                        // disable RX interrupts
   void setBaudRate(uint16_t baudRate);  // 9600 [default], 19200, 38400
-  virtual int available();              //  virtul = member function that is declared within a base class and is re-defined (overridden) by a derived class
+  virtual int available();              // virtual = member function that is declared within a base class and is re-defined (overridden) by a derived class
   virtual int read();
   virtual size_t write(uint8_t txChar);
   using Stream::write; // make the base class overloads visible

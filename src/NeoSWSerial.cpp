@@ -2,6 +2,8 @@
 // NeoSWSerial
 // Copyright (C) 2015-2017, SlashDevin
 //
+// https://github.com/SlashDevin/NeoSWSerial/
+//
 // NeoSWSerial is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
@@ -34,6 +36,8 @@
 // Default baud rate is 9600
 static const uint8_t TICKS_PER_BIT_9600 = (uint8_t) 26;
                               // 9600 baud bit width in units of 4us
+                              // one bit duration = 26 * 4us = 104 us, that gives f = 1/104us = 9 615 Hz, that is 9 615 bit_changes/s = baud rate 
+                              // set 25 and you will get 10 000 Hz, set 27 and you will get 9 259 Hz/Baud
 static const uint8_t TICKS_PER_BIT_31250 = 8;
                               // 31250 baud bit width in units of 4us
 
@@ -42,9 +46,10 @@ static const uint8_t BITS_PER_TICK_31250_Q10 = 128;
 static const uint8_t BITS_PER_TICK_38400_Q10 = 157;
                      // 1s/(38400 bits) * (1 tick)/(4 us) * 2^10  "multiplier"
 
-#if F_CPU == 16000000L
-  #define TCNTX TCNT0
-  #define PCI_FLAG_REGISTER PCIFR
+// MARK: TODO Nano Matter uses 39 000 000 Hz -> possible to use ARDUINO_NANO_MATTER flag (defined in boards.txt and platform.txt)
+#if F_CPU == 16000000L // F_CPU tells compiler what CPU speed to use for various delays and functions
+  #define TCNTX TCNT0 // Assign Timer Counter register
+  #define PCI_FLAG_REGISTER PCIFR // Assign Pin Change interrupt flag register
 #elif F_CPU == 8000000L
   #if defined(__AVR_ATtiny25__) | \
       defined(__AVR_ATtiny45__) | \
@@ -114,7 +119,13 @@ static uint16_t mul8x8to16(uint8_t x, uint8_t y)
 
 //..........................................
 
-static uint16_t bitTimes( uint8_t dt )
+/**
+ * @brief Return the (RX window + dt) duration multiplied by bits per tick
+ * 
+ * @param dt 
+ * @return uint16_t 
+ */
+static uint16_t bitTimes( uint8_t dt ) // dt = data transition time
 {
   return mul8x8to16( dt + rxWindowWidth, bitsPerTick_Q10 ) >> 10;
 
@@ -122,6 +133,11 @@ static uint16_t bitTimes( uint8_t dt )
 
 //----------------------------------------------------------------------------
 
+/**
+ * @brief initialize, set baudrate, listen
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::begin(uint16_t baudRate)
 {
   setBaudRate( baudRate );
@@ -130,6 +146,11 @@ void NeoSWSerial::begin(uint16_t baudRate)
 
 //----------------------------------------------------------------------------
 
+/**
+ * @brief enable RX interrupts
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::listen()
 {
   if (listener)
@@ -195,7 +216,7 @@ void NeoSWSerial::listen()
     // Enable the pin change interrupts
 
     uint8_t prevSREG = SREG;
-    cli();
+    cli(); // Clear interrupt global enable flag bit (disable all interrupts).
     {
       *pcmsk                    |= _BV(digitalPinToPCMSKbit(rxPin));
       *digitalPinToPCICR(rxPin) |= _BV(digitalPinToPCICRbit(rxPin));
@@ -207,7 +228,11 @@ void NeoSWSerial::listen()
 } // listen
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief disable RX interrupts
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::ignore()
 {
   if (listener) {
@@ -228,7 +253,11 @@ void NeoSWSerial::ignore()
 } // ignore
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief Sets baud rate to 9600 [default], 19200, 38400
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::setBaudRate(uint16_t baudRate)
 {
   if ((
@@ -249,17 +278,22 @@ void NeoSWSerial::setBaudRate(uint16_t baudRate)
 
 //----------------------------------------------------------------------------
 
+/**
+ * @brief Checks if some bit is available in RX buffer
+ * 
+ * @param baudRate 
+ */
 int NeoSWSerial::available()
 {
   uint8_t avail = ((rxHead - rxTail + RX_BUFFER_SIZE) % RX_BUFFER_SIZE);
   
   if (avail == 0) {
-    cli();
+    cli(); //  Clear interrupt global enable flag bit (disable all interrupts).
       if (checkRxTime()) {
         avail = 1;
         DBG_NSS_COUNT(availCompletions);
       }
-    sei();
+    sei(); // Set interrupt global enable flag bit (re-enable interrupts after being disabled).
   }
 
   return avail;
@@ -267,7 +301,11 @@ int NeoSWSerial::available()
 } // available
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief Returns last read character
+ * 
+ * @param baudRate 
+ */
 int NeoSWSerial::read()
 {
   if (rxHead == rxTail) return -1;
@@ -279,7 +317,17 @@ int NeoSWSerial::read()
 } // read
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief Assign function called whenever character is received. 
+ * The registered procedure will be called from the ISR whenever a character is received. 
+ * The received character will not be stored in the rx_buffer, and it will not be returned from read().
+ * Any characters that were received and buffered before attachInterrupt was called remain in rx_buffer,
+ * and could be retrieved by calling read(). If attachInterrupt is never called,
+ * or it is passed a NULL procedure, the normal buffering occurs, and all received characters
+ * must be obtained by calling read()
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::attachInterrupt( isr_t fn )
 {
   uint8_t oldSREG = SREG;
@@ -290,7 +338,11 @@ void NeoSWSerial::attachInterrupt( isr_t fn )
 } // attachInterrupt
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief TODO
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::startChar()
 {
   rxState = 0;     // got a start bit
@@ -302,7 +354,11 @@ void NeoSWSerial::startChar()
 } // startChar
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief TODO
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::rxISR( uint8_t rxPort )
 {
   uint8_t t0 = TCNTX;            // time of data transition (plus ISR latency)
@@ -371,7 +427,11 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
 } // rxISR
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief TODO
+ * 
+ * @param baudRate 
+ */
 bool NeoSWSerial::checkRxTime()
 {
   if (rxState != WAITING_FOR_START_BIT) {
@@ -405,7 +465,11 @@ bool NeoSWSerial::checkRxTime()
 } // checkRxTime
 
 //----------------------------------------------------------------------------
-
+/**
+ * @brief TODO
+ * 
+ * @param baudRate 
+ */
 void NeoSWSerial::rxChar( uint8_t c )
 {
   if (listener) {
