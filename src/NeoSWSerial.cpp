@@ -46,7 +46,6 @@ static const uint8_t BITS_PER_TICK_31250_Q10 = 128;
 static const uint8_t BITS_PER_TICK_38400_Q10 = 157;
                      // 1s/(38400 bits) * (1 tick)/(4 us) * 2^10  "multiplier"
 
-// MARK: TODO Nano Matter uses 39 000 000 Hz -> possible to use ARDUINO_NANO_MATTER flag (defined in boards.txt and platform.txt)
 #if F_CPU == 16000000L // F_CPU tells compiler what CPU speed to use for various delays and functions
   #define TCNTX TCNT0 // Assign Timer Counter register
   #define PCI_FLAG_REGISTER PCIFR // Assign Pin Change interrupt flag register
@@ -60,6 +59,9 @@ static const uint8_t BITS_PER_TICK_38400_Q10 = 157;
     #define TCNTX TCNT2
     #define PCI_FLAG_REGISTER PCIFR
   #endif
+// MARK: TODO Nano Matter uses 39 000 000 Hz -> possible to use ARDUINO_NANO_MATTER flag (defined in boards.txt and platform.txt)
+#elif F_CPU == 39000000L
+  #define TCNTX TCNT0 // Assign Timer Counter register, just tried, not sure if it is TCNT0
 #endif
 
 static NeoSWSerial *listener = (NeoSWSerial *) NULL;
@@ -114,6 +116,9 @@ static volatile uint8_t *txPort;  // port register
 
 #endif
 
+// MACROS MISSING FOR ARDUINO MATTER
+#define _BV(bit) (1 << (bit))
+
 static uint16_t mul8x8to16(uint8_t x, uint8_t y)
 {return x*y;}
 
@@ -158,7 +163,7 @@ void NeoSWSerial::listen()
 
   pinMode(rxPin, INPUT);
   rxBitMask = digitalPinToBitMask( rxPin );
-  rxPort    = portInputRegister( digitalPinToPort( rxPin ) );
+  rxPort    = portInputRegister( digitalPinToPort( rxPin ) ); // returns an input port register of the specified port => PIND, PINB, PINC..., this register contains input values
 
   txBitMask = digitalPinToBitMask( txPin );
   txPort    = portOutputRegister( digitalPinToPort( txPin ) );
@@ -235,19 +240,29 @@ void NeoSWSerial::listen()
  */
 void NeoSWSerial::ignore()
 {
+  // About interrupts, example: When a logic change on any PCINT23..16 pin triggers an interrupt request, PCIF2 becomes set (one). 
+  // If the I-bit (bit 7) in SREG and the PCIE2 bit in PCICR are set (one), the MCU will jump to the corresponding interrupt vector.
+  // The flag is cleared when the interrupt routine is executed.
+  // External Interrupts are limited to only a couple pins, while the Pin Change interrupts (used here) can occur on all input pins.
+  // Pin Change Interrupts share an ISR between all the pins on a port (port B, C, and D).  And anytime a pin changes on that port, 
+  // it calls the port’s ISR which must then decide which pin caused the interrupt.
   if (listener) {
-    volatile uint8_t *pcmsk = digitalPinToPCMSK(rxPin);
+    volatile uint8_t *pcmsk = digitalPinToPCMSK(rxPin); // PCMSKx -> controls which pin from specific port can produce interrupt
 
+    // SREG is the processor Status REGister. Global Interrupt Enable bit, carry and zero bit and so on... Save it.
     uint8_t prevSREG = SREG;
-    cli();
+    cli(); // disable global interrupts
+
+    // Disable interrupts on RX pin
     {
       listener = (NeoSWSerial *) NULL;
-      if (pcmsk) {
-        *digitalPinToPCICR(rxPin) &= ~_BV(digitalPinToPCICRbit(rxPin));
-        *pcmsk &= ~_BV(digitalPinToPCMSKbit(rxPin));
+      if (pcmsk) { // if pcmsk != 0, something is enabled
+        // PCICR = Pin Change Interrupt Control Register - controls which port is open to interrupts from pins
+        *digitalPinToPCICR(rxPin) &= ~_BV(digitalPinToPCICRbit(rxPin)); // Disable interrupts for bunch of pins (port) containing rxPin
+        *pcmsk &= ~_BV(digitalPinToPCMSKbit(rxPin)); // Disable interrupts from specific pin (rxPin)
       }
     }
-    SREG = prevSREG;
+    SREG = prevSREG; // Restore Status register
   }
 
 } // ignore
@@ -260,6 +275,7 @@ void NeoSWSerial::ignore()
  */
 void NeoSWSerial::setBaudRate(uint16_t baudRate)
 {
+  // If requested baud rate is supported and F_CPU is big enough...
   if ((
         ( baudRate ==  9600) ||
         ( baudRate == 19200) ||
@@ -279,16 +295,15 @@ void NeoSWSerial::setBaudRate(uint16_t baudRate)
 //----------------------------------------------------------------------------
 
 /**
- * @brief Checks if some bit is available in RX buffer
- * 
- * @param baudRate 
+ * @brief Checks if some bit is available in RX buffer. If interrupt routine is 
+ * attached, return false always.
  */
 int NeoSWSerial::available()
 {
-  uint8_t avail = ((rxHead - rxTail + RX_BUFFER_SIZE) % RX_BUFFER_SIZE);
+  uint8_t avail = ((rxHead - rxTail + RX_BUFFER_SIZE) % RX_BUFFER_SIZE); // (0 + x) % x = 0, (x + x) % x = 0, otherwise 1
   
-  if (avail == 0) {
-    cli(); //  Clear interrupt global enable flag bit (disable all interrupts).
+  if (avail == 0) { // MARK: TODO Probably solving some edge case?
+    cli(); //  Disable all interrupts - Clear interrupt global enable flag
       if (checkRxTime()) {
         avail = 1;
         DBG_NSS_COUNT(availCompletions);
@@ -302,9 +317,7 @@ int NeoSWSerial::available()
 
 //----------------------------------------------------------------------------
 /**
- * @brief Returns last read character
- * 
- * @param baudRate 
+ * @brief Returns oldest read character (FIFO)
  */
 int NeoSWSerial::read()
 {
@@ -320,28 +333,26 @@ int NeoSWSerial::read()
 /**
  * @brief Assign function called whenever character is received. 
  * The registered procedure will be called from the ISR whenever a character is received. 
- * The received character will not be stored in the rx_buffer, and it will not be returned from read().
+ * After attaching the function, the received character will not be stored in the rx_buffer, and it will not be returned from read().
  * Any characters that were received and buffered before attachInterrupt was called remain in rx_buffer,
  * and could be retrieved by calling read(). If attachInterrupt is never called,
  * or it is passed a NULL procedure, the normal buffering occurs, and all received characters
- * must be obtained by calling read()
+ * must be obtained by calling read().
  * 
- * @param baudRate 
+ * @param fn 
  */
 void NeoSWSerial::attachInterrupt( isr_t fn )
 {
-  uint8_t oldSREG = SREG;
-  cli();
+  uint8_t oldSREG = SREG; // save status register
+  cli(); // disable global interrupts
     _isr = fn;
-  SREG = oldSREG;
+  SREG = oldSREG; // Restore status register
 
 } // attachInterrupt
 
 //----------------------------------------------------------------------------
 /**
  * @brief TODO
- * 
- * @param baudRate 
  */
 void NeoSWSerial::startChar()
 {
@@ -357,19 +368,19 @@ void NeoSWSerial::startChar()
 /**
  * @brief TODO
  * 
- * @param baudRate 
+ * @param rxPort 
  */
 void NeoSWSerial::rxISR( uint8_t rxPort )
 {
   uint8_t t0 = TCNTX;            // time of data transition (plus ISR latency)
-  uint8_t d  = rxPort & rxBitMask; // read RX data level
+  uint8_t rd_value  = rxPort & rxBitMask; // read RX data level
 
   if (rxState == WAITING_FOR_START_BIT) {
 
     // If it looks like a start bit then initialize;
     //   otherwise ignore the rising edge and exit.
 
-    if (d != 0) return;   // it's high so not a start bit, exit
+    if (rd_value != 0) return;   // it's high so not a start bit, exit
     startChar();
 
   } else {  // data bit or stop bit (probably) received
@@ -391,14 +402,14 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
 
     // Set all those bits
 
-    if (d == 0) {
+    if (rd_value == 0) {
       // back fill previous bits with 1's
       while (bitsThisFrame-- > 0) {
         rxValue |= rxMask;
         rxMask   = rxMask << 1;
       }
       rxMask = rxMask << 1;
-    } else { // d==1
+    } else { // rd_value==1
       // previous bits were 0's so only this bit is a 1.
       rxMask   = rxMask << (bitsThisFrame-1);
       rxValue |= rxMask;
@@ -409,7 +420,7 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
     if (rxState > 7) {
       rxChar( rxValue );
 
-      if ((d == 1) || !nextCharStarted) {
+      if ((rd_value == 1) || !nextCharStarted) {
         rxState = WAITING_FOR_START_BIT;
         // DISABLE STOP BIT TIMER
 
@@ -429,33 +440,31 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
 //----------------------------------------------------------------------------
 /**
  * @brief TODO
- * 
- * @param baudRate 
  */
 bool NeoSWSerial::checkRxTime()
 {
   if (rxState != WAITING_FOR_START_BIT) {
 
-    uint8_t d  = *rxPort & rxBitMask;
+    uint8_t rd_value  = *rxPort & rxBitMask;
 
-    if (d) {
+    if (rd_value) {
       // Ended on a 1, see if it has been too long
-      uint8_t  t0        = TCNTX; // now
-      uint16_t rxBits    = bitTimes( t0-prev_t0 );
-      uint8_t  bitsLeft  = 9 - rxState;
-      bool     completed = (rxBits > bitsLeft);
+      uint8_t  t0        = TCNTX; // save current timer value = now
+      uint16_t rxBits    = bitTimes( t0-prev_t0 ); // how many bits should be already received, prev_t0 is set in every rxISR
+      uint8_t  bitsLeft  = 9 - rxState; // 9 - bits_received
+      bool     completed = (rxBits > bitsLeft); // MARK: TODO Dont understand...
 
       if (completed) {
         DBG_NSS_COUNT(checkRxCompletions);
 
-        while (bitsLeft-- > 0) {
+        while (bitsLeft-- > 0) { // create character from the received bits
           rxValue |= rxMask;
           rxMask   = rxMask << 1;
         }
 
         rxState = WAITING_FOR_START_BIT;
-        rxChar( rxValue );
-        if (!_isr)
+        rxChar( rxValue ); // process received character = save to buffer or call routine
+        if (!_isr) // if interrupt routine is not attached...
           return true;
       }
     }
@@ -466,16 +475,17 @@ bool NeoSWSerial::checkRxTime()
 
 //----------------------------------------------------------------------------
 /**
- * @brief TODO
+ * @brief Called when character successfully received. Forwards character to 
+ * attached interrupt rutine (if exists) or saves it to the rxBuffer 
  * 
- * @param baudRate 
+ * @param c 
  */
 void NeoSWSerial::rxChar( uint8_t c )
 {
   if (listener) {
-    if (listener->_isr)
-      listener->_isr( c );
-    else {
+    if (listener->_isr) // if interrupt rutine is attached...
+      listener->_isr( c ); // call it with character
+    else { // otherwise save character to the buffer
       uint8_t index = (rxHead+1) % RX_BUFFER_SIZE;
       if (index != rxTail) {
         rxBuffer[rxHead] = c;
