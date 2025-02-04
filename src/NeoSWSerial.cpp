@@ -34,16 +34,17 @@
 #include <NeoSWSerial.h>
 
 // Default baud rate is 9600
-static const uint8_t TICKS_PER_BIT_9600 = (uint8_t) 26;
-                              // 9600 baud bit width in units of 4us
-                              // one bit duration = 26 * 4us = 104 us, that gives f = 1/104us = 9 615 Hz, that is 9 615 bit_changes/s = baud rate 
-                              // set 25 and you will get 10 000 Hz, set 27 and you will get 9 259 Hz/Baud
-static const uint8_t TICKS_PER_BIT_31250 = 8;
+static const uint8_t TICKS_PER_ONE_BIT_WHEN_9600 = (uint8_t) 26; // How many 4us ticks (x) has to elapse to transmit one bit during 9 600 Baud
+                              // Transfer one bit (no matter if status or data bit) when there is 9 600 bit_changes/s takes 1/9600 s
+                              // x * 4us = 1/9600
+                              // x = 26.04 -> ~26
+
+static const uint8_t TICKS_PER_ONE_BIT_WHEN_31250 = 8; // How many 4us ticks (x) has to elapse to transmit one bit during 31 250 Baud
                               // 31250 baud bit width in units of 4us
 
-static const uint8_t BITS_PER_TICK_31250_Q10 = 128;
-                     // 31250 bps * 0.000004 s * 2^10 "multiplier"
-static const uint8_t BITS_PER_TICK_38400_Q10 = 157;
+static const uint8_t BITS_TRANSMITTED_PER_ONE_TICK_WHEN_31250_MULTIPLIED_BY_1024 = 128; // How many bits is transmitted after 4us (tick) during 31 250 Baud multiplied by 1024 to get non decimal number
+                     // 31250 bps * 0.000004 s (= bits per 4 us) * 2^10 
+static const uint8_t BITS_TRANSMITTED_PER_ONE_TICK_WHEN_3840_MULTIPLIED_BY_1024 = 157;
                      // 1s/(38400 bits) * (1 tick)/(4 us) * 2^10  "multiplier"
 
 #if F_CPU == 16000000L // F_CPU tells compiler what CPU speed to use for various delays and functions
@@ -66,7 +67,7 @@ static const uint8_t BITS_PER_TICK_38400_Q10 = 157;
 
 static NeoSWSerial *listener = (NeoSWSerial *) NULL;
 
-static uint8_t txBitWidth;
+static uint8_t oneTxBitTicks;
 static uint8_t rxWindowWidth;
 static uint8_t bitsPerTick_Q10; // multiplier!
 
@@ -125,7 +126,10 @@ static uint16_t mul8x8to16(uint8_t x, uint8_t y)
 //..........................................
 
 /**
- * @brief Return the (RX window + dt) duration multiplied by bits per tick
+ * @brief Return number of bits transmitted/received in given period dt.
+ * Number of elapsed ticks multiplied by bits per tick
+ * gives number of transmitted bits. Because "bits per tick" was previously
+ * multiplied by 1024 to get non decimal number, the result is now divided by 1024 and returned.
  * 
  * @param dt 
  * @return uint16_t 
@@ -183,8 +187,8 @@ void NeoSWSerial::listen()
     #endif
   }
 
-  volatile uint8_t *pcmsk = digitalPinToPCMSK(rxPin);
-  if (pcmsk) {
+  volatile uint8_t *pcmsk = digitalPinToPCMSK(rxPin); // PCMSKx -> controls which pin from specific port can produce interrupt
+  if (pcmsk) { // if interrupt on some pin is enabled
     rxState  = WAITING_FOR_START_BIT;
     rxHead   = rxTail = 0;    // no characters in buffer
     flush();
@@ -193,27 +197,27 @@ void NeoSWSerial::listen()
     
     switch (_baudRate) {
       case 9600:
-        txBitWidth      = TICKS_PER_BIT_9600          ;
-        bitsPerTick_Q10 = BITS_PER_TICK_38400_Q10 >> 2;
-        rxWindowWidth   = 10;
+        oneTxBitTicks      = TICKS_PER_ONE_BIT_WHEN_9600          ; // Bit width expressed in number of 4us intervals
+        bitsPerTick_Q10 = BITS_TRANSMITTED_PER_ONE_TICK_WHEN_3840_MULTIPLIED_BY_1024 >> 2;
+        rxWindowWidth   = 10; // MARK: TODO Not fully understand...
         break;
       case 31250:
         if (F_CPU > 12000000L) {
-          txBitWidth = TICKS_PER_BIT_31250;
-          bitsPerTick_Q10 = BITS_PER_TICK_31250_Q10;
+          oneTxBitTicks = TICKS_PER_ONE_BIT_WHEN_31250;
+          bitsPerTick_Q10 = BITS_TRANSMITTED_PER_ONE_TICK_WHEN_31250_MULTIPLIED_BY_1024;
           rxWindowWidth = 5;
           break;
         } // else use 19200
       case 38400:
         if (F_CPU > 12000000L) {
-          txBitWidth      = TICKS_PER_BIT_9600    >> 2;
-          bitsPerTick_Q10 = BITS_PER_TICK_38400_Q10   ;
+          oneTxBitTicks      = TICKS_PER_ONE_BIT_WHEN_9600    >> 2;
+          bitsPerTick_Q10 = BITS_TRANSMITTED_PER_ONE_TICK_WHEN_3840_MULTIPLIED_BY_1024   ;
           rxWindowWidth   = 4;
           break;
         } // else use 19200
       case 19200:
-        txBitWidth      = TICKS_PER_BIT_9600      >> 1;
-        bitsPerTick_Q10 = BITS_PER_TICK_38400_Q10 >> 1;
+        oneTxBitTicks      = TICKS_PER_ONE_BIT_WHEN_9600      >> 1;
+        bitsPerTick_Q10 = BITS_TRANSMITTED_PER_ONE_TICK_WHEN_3840_MULTIPLIED_BY_1024 >> 1;
         rxWindowWidth   = 6;
         break;
     }
@@ -223,8 +227,8 @@ void NeoSWSerial::listen()
     uint8_t prevSREG = SREG;
     cli(); // Clear interrupt global enable flag bit (disable all interrupts).
     {
-      *pcmsk                    |= _BV(digitalPinToPCMSKbit(rxPin));
-      *digitalPinToPCICR(rxPin) |= _BV(digitalPinToPCICRbit(rxPin));
+      *pcmsk                    |= _BV(digitalPinToPCMSKbit(rxPin)); // Enable interrupts from specific pin (rxPin)
+      *digitalPinToPCICR(rxPin) |= _BV(digitalPinToPCICRbit(rxPin)); // Enable interrupts for bunch of pins (port) containing rxPin
       listener = this;
     }
     SREG = prevSREG;
@@ -269,13 +273,13 @@ void NeoSWSerial::ignore()
 
 //----------------------------------------------------------------------------
 /**
- * @brief Sets baud rate to 9600 [default], 19200, 38400
+ * @brief Sets baud rate to 9600 [default], 19200, 38400 and restarts.
  * 
  * @param baudRate 
  */
 void NeoSWSerial::setBaudRate(uint16_t baudRate)
 {
-  // If requested baud rate is supported and F_CPU is big enough...
+  // If requested baud rate is supported and F_CPU is big enough -> set baud rate and restart
   if ((
         ( baudRate ==  9600) ||
         ( baudRate == 19200) ||
@@ -296,7 +300,7 @@ void NeoSWSerial::setBaudRate(uint16_t baudRate)
 
 /**
  * @brief Checks if some bit is available in RX buffer. If interrupt routine is 
- * attached, return false always.
+ * attached, return always false.
  */
 int NeoSWSerial::available()
 {
@@ -352,7 +356,7 @@ void NeoSWSerial::attachInterrupt( isr_t fn )
 
 //----------------------------------------------------------------------------
 /**
- * @brief TODO
+ * @brief Clear internal variables for next transmission after start bit detection.
  */
 void NeoSWSerial::startChar()
 {
@@ -366,7 +370,7 @@ void NeoSWSerial::startChar()
 
 //----------------------------------------------------------------------------
 /**
- * @brief TODO
+ * @brief Called when pin change the value. 
  * 
  * @param rxPort 
  */
@@ -380,23 +384,29 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
     // If it looks like a start bit then initialize;
     //   otherwise ignore the rising edge and exit.
 
-    if (rd_value != 0) return;   // it's high so not a start bit, exit
-    startChar();
+    if (rd_value != 0){
+      return;   // it's high so not a start bit, exit
+    } else {
+      startChar();
+    }
+    
 
   } else {  // data bit or stop bit (probably) received
 
     DBG_NSS_ARRAY(bitTransitionTimes, bitTransitions, (t0-prev_t0));
 
     // Determine how many bit periods have elapsed since the last transition.
+    // It is necessary because for example chain of many zeros dont produce any transition
+    // -> no call of ISR, but bits arrived! 
 
-    uint16_t rxBits          = bitTimes( t0-prev_t0 );
+    uint16_t rxBitsReceived  = bitTimes( t0-prev_t0 ); // number of received bits from the previous ISR call
     uint8_t  bitsLeft        = 9 - rxState; // ignores stop bit
-    bool     nextCharStarted = (rxBits > bitsLeft);
+    bool     nextCharStarted = (rxBitsReceived > bitsLeft);
 
     if (nextCharStarted)
-      DBG_NSS_ARRAY(rxStartCompletionBits,rxStartCompletions,(10*rxBits + bitsLeft));
+      DBG_NSS_ARRAY(rxStartCompletionBits,rxStartCompletions,(10*rxBitsReceived + bitsLeft));
 
-    uint8_t  bitsThisFrame   =  nextCharStarted ? bitsLeft : rxBits;
+    uint8_t  bitsThisFrame   =  nextCharStarted ? bitsLeft : rxBitsReceived;
 
     rxState += bitsThisFrame;
 
@@ -450,14 +460,14 @@ bool NeoSWSerial::checkRxTime()
     if (rd_value) {
       // Ended on a 1, see if it has been too long
       uint8_t  t0        = TCNTX; // save current timer value = now
-      uint16_t rxBits    = bitTimes( t0-prev_t0 ); // how many bits should be already received, prev_t0 is set in every rxISR
+      uint16_t rxBitsReceived    = bitTimes( t0-prev_t0 ); // how many bits should be already received, prev_t0 is set in every rxISR
       uint8_t  bitsLeft  = 9 - rxState; // 9 - bits_received
-      bool     completed = (rxBits > bitsLeft); // MARK: TODO Dont understand...
+      bool     completed = (rxBitsReceived > bitsLeft); // MARK: TODO Dont understand...
 
       if (completed) {
         DBG_NSS_COUNT(checkRxCompletions);
 
-        while (bitsLeft-- > 0) { // create character from the received bits
+        while (bitsLeft-- > 0) { // create character from the received bits, LSB came first
           rxValue |= rxMask;
           rxMask   = rxMask << 1;
         }
@@ -620,9 +630,9 @@ size_t NeoSWSerial::write(uint8_t txChar)
       else
         *txPort &= ~txBitMask;    //   else set TX line low
 
-      width = txBitWidth;
+      width = oneTxBitTicks;
       if ((F_CPU == 16000000L) &&
-          (width == TICKS_PER_BIT_9600/4) &&
+          (width == TICKS_PER_ONE_BIT_WHEN_9600/4) &&
           (txBit & 0x01)) {
         // The width is 6.5 ticks, so add a tick every other bit
         width++;  
