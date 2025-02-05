@@ -299,14 +299,16 @@ void NeoSWSerial::setBaudRate(uint16_t baudRate)
 //----------------------------------------------------------------------------
 
 /**
- * @brief Checks if some bit is available in RX buffer. If interrupt routine is 
+ * @brief Checks if some new char is available in RX buffer. If interrupt routine is 
  * attached, return always false.
  */
 int NeoSWSerial::available()
 {
-  uint8_t avail = ((rxHead - rxTail + RX_BUFFER_SIZE) % RX_BUFFER_SIZE); // (0 + x) % x = 0, (x + x) % x = 0, otherwise 1
+  uint8_t avail = ((rxHead - rxTail + RX_BUFFER_SIZE) % RX_BUFFER_SIZE); // (0 + x) % x = 0, (x + x) % x = 0, otherwise != 0
   
-  if (avail == 0) { // MARK: TODO Probably solving some edge case?
+  // Even when there is not new char saved in the buffer, all bits could arrive,
+  // but because all of them were ones, it didnt trigger saving mechanism -> check this edge case.
+  if (avail == 0) { 
     cli(); //  Disable all interrupts - Clear interrupt global enable flag
       if (checkRxTime()) {
         avail = 1;
@@ -370,7 +372,9 @@ void NeoSWSerial::startChar()
 
 //----------------------------------------------------------------------------
 /**
- * @brief Called when pin change the value. 
+ * @brief Called when pin change the value, so we received one or more (chained)
+ * bits. According type and position of bit(s) gradually creates
+ * comming character (8 bits, rxValue) and on the end calls rxChar().
  * 
  * @param rxPort 
  */
@@ -396,23 +400,23 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
     DBG_NSS_ARRAY(bitTransitionTimes, bitTransitions, (t0-prev_t0));
 
     // Determine how many bit periods have elapsed since the last transition.
-    // It is necessary because for example chain of many zeros dont produce any transition
+    // It is necessary because for example chain of many zeros/ones dont produce any transition
     // -> no call of ISR, but bits arrived! 
 
-    uint16_t rxBitsReceived  = bitTimes( t0-prev_t0 ); // number of received bits from the previous ISR call
+    uint16_t rxBitsReceived  = bitTimes( t0-prev_t0 ); // number of arrived bits from the previous ISR call
     uint8_t  bitsLeft        = 9 - rxState; // ignores stop bit
-    bool     nextCharStarted = (rxBitsReceived > bitsLeft);
+    bool     nextCharStarted = (rxBitsReceived > bitsLeft); // Did I receive more than one frame of bits?
 
     if (nextCharStarted)
       DBG_NSS_ARRAY(rxStartCompletionBits,rxStartCompletions,(10*rxBitsReceived + bitsLeft));
 
-    uint8_t  bitsThisFrame   =  nextCharStarted ? bitsLeft : rxBitsReceived;
+    uint8_t  bitsThisFrame   =  nextCharStarted ? bitsLeft : rxBitsReceived; // Number of received bits for current frame without bits of the next frame
 
-    rxState += bitsThisFrame;
+    rxState += bitsThisFrame; // Update number of received bits in this ISR
 
-    // Set all those bits
+    // Update rxValue by received bits
 
-    if (rd_value == 0) {
+    if (rd_value == 0) { // Before transition to zero, there was a chain of ones
       // back fill previous bits with 1's
       while (bitsThisFrame-- > 0) {
         rxValue |= rxMask;
@@ -426,7 +430,6 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
     }
 
     // If 8th bit or stop bit then the character is complete.
-
     if (rxState > 7) {
       rxChar( rxValue );
 
@@ -436,7 +439,7 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
 
       } else {
         // The last char ended with 1's, so this 0 is actually
-        //   the start bit of the next character.
+        // the start bit of the next character.
 
         startChar();
       }
@@ -449,7 +452,10 @@ void NeoSWSerial::rxISR( uint8_t rxPort )
 
 //----------------------------------------------------------------------------
 /**
- * @brief TODO
+ * @brief Called when there is a suspicious that frame was already received,
+ * but due to the stable value (all following bits were in 1) on pin
+ * it did not trigger ISR. In that case method creates rxValue automatically
+ * saves it to buffer, call user routine  and returns true.
  */
 bool NeoSWSerial::checkRxTime()
 {
@@ -458,16 +464,17 @@ bool NeoSWSerial::checkRxTime()
     uint8_t rd_value  = *rxPort & rxBitMask;
 
     if (rd_value) {
-      // Ended on a 1, see if it has been too long
+      // Start bit came and than all bits had value 1. 
+      // Check whether I should already have all frame -> time of frame elapsed.
       uint8_t  t0        = TCNTX; // save current timer value = now
-      uint16_t rxBitsReceived    = bitTimes( t0-prev_t0 ); // how many bits should be already received, prev_t0 is set in every rxISR
-      uint8_t  bitsLeft  = 9 - rxState; // 9 - bits_received
-      bool     completed = (rxBitsReceived > bitsLeft); // MARK: TODO Dont understand...
+      uint16_t rxBitsReceived    = bitTimes( t0-prev_t0 ); // // number of arrived bits from the previous ISR call, prev_t0 is set in every rxISR
+      uint8_t  bitsLeft  = 9 - rxState; // = 9 - bits_processed
+      bool     completed = (rxBitsReceived > bitsLeft); // Did I already receive all bits of current frame OR more?
 
-      if (completed) {
+      if (completed) { // I already have all bits -> process them!
         DBG_NSS_COUNT(checkRxCompletions);
 
-        while (bitsLeft-- > 0) { // create character from the received bits, LSB came first
+        while (bitsLeft-- > 0) { // create character from the received bits (chain of ones), LSB came first
           rxValue |= rxMask;
           rxMask   = rxMask << 1;
         }
@@ -486,7 +493,7 @@ bool NeoSWSerial::checkRxTime()
 //----------------------------------------------------------------------------
 /**
  * @brief Called when character successfully received. Forwards character to 
- * attached interrupt rutine (if exists) or saves it to the rxBuffer 
+ * the attached interrupt routine (if exists) or saves it to the rxBuffer.
  * 
  * @param c 
  */
