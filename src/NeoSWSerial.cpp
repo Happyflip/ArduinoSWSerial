@@ -60,9 +60,9 @@ static const uint8_t BITS_TRANSMITTED_PER_ONE_TICK_WHEN_3840_MULTIPLIED_BY_1024 
     #define TCNTX TCNT2
     #define PCI_FLAG_REGISTER PCIFR
   #endif
-// MARK: TODO Nano Matter uses 39 000 000 Hz -> possible to use ARDUINO_NANO_MATTER flag (defined in boards.txt and platform.txt)
+// Nano Matter uses 39 000 000 Hz, possible to use F_CPU or ARDUINO_NANO_MATTER flag (defined in boards.txt and platform.txt)
 #elif F_CPU == 39000000L
-  #define TCNTX TCNT0 // Assign Timer Counter register, just tried, not sure if it is TCNT0
+  #define TCNTX TCNT0 // MARK: TODO Assign Timer Counter register, just tried, not sure if it is TCNT0
 #endif
 
 static NeoSWSerial *listener = (NeoSWSerial *) NULL;
@@ -199,7 +199,7 @@ void NeoSWSerial::listen()
       case 9600:
         oneTxBitTicks      = TICKS_PER_ONE_BIT_WHEN_9600          ; // Bit width expressed in number of 4us intervals
         bitsPerTick_Q10 = BITS_TRANSMITTED_PER_ONE_TICK_WHEN_3840_MULTIPLIED_BY_1024 >> 2;
-        rxWindowWidth   = 10; // MARK: TODO Not fully understand...
+        rxWindowWidth   = 10; // MARK: TODO Not fully understand... Probably receive window is shorter than bit duration to read it in right moment?
         break;
       case 31250:
         if (F_CPU > 12000000L) {
@@ -526,12 +526,21 @@ void NeoSWSerial::rxChar( uint8_t c )
   // This handy PCINT code for different boards is based on PinChangeInterrupt.*
   // from the excellent Cosa project: http://github.com/mikaelpatel/Cosa
 
-  #define PCINT_ISR(vec,pin)		\
-  extern "C" { \
-  ISR(PCINT ## vec ## _vect)		\
-  {								              \
-    NeoSWSerial::rxISR(pin);	  \
-  } }
+  // Each PCINTx-bit selects whether pin change interrupt is enabled on the corresponding I/O pin.
+  // If PCINTx-bit is set and the PCIE2 bit in PCICR is set, pin change interrupt is enabled.
+
+  // extern "C" means that function name is put into symbol table under the same name.
+  // (C++ usually adds some extensions to function names to make overloaded functions unique) 
+  // So some client C code can link (use) this function using a C compatible header file,
+  // that contains just the declaration of my function under the same name.
+  //
+  // '##' operator in define concatenate tokens:
+  // #define ArgArg(x, y)   x##y
+  // ArgArg(lady, bug) -> expanded to: "ladybug"
+
+
+  // Macro to subscribe handler (rxISR) to the selected interrupt vector ISR(PCINTx_vect)
+  #define PCINT_ISR(vec,pin) extern "C" { ISR(PCINT ## vec ## _vect) { NeoSWSerial::rxISR(pin);	} }
 
   #if defined(__AVR_ATtiny261__) | \
       defined(__AVR_ATtiny461__) | \
@@ -561,7 +570,7 @@ void NeoSWSerial::rxChar( uint8_t c )
 
   #elif defined(__AVR_ATmega328P__)
 
-  PCINT_ISR(0, PINB);
+  PCINT_ISR(0, PINB); // subscribe rxISR to PCINT0_vect vector and tell rxISR that interrupt possibly come from input buffer of PORT B
   PCINT_ISR(1, PINC);
   PCINT_ISR(2, PIND);
 
@@ -598,6 +607,10 @@ void NeoSWSerial::rxChar( uint8_t c )
   PCINT_ISR(0, PINB);
   PCINT_ISR(1, PINE);
 
+  #elif defined(ARDUINO_NANO_MATTER)
+
+  // MARK: TODO assign interrupt vector to function for arduino Matter
+
   #else
     #error MCU not supported by NeoSWSerial!
   #endif
@@ -619,7 +632,7 @@ size_t NeoSWSerial::write(uint8_t txChar)
   uint8_t width;         // ticks for one bit
   uint8_t txBit  = 0;    // first bit is start bit
   uint8_t b      = 0;    // start bit is low
-  uint8_t PCIbit = bit(digitalPinToPCICRbit(rxPin));
+  uint8_t PCIbit = bit(digitalPinToPCICRbit(rxPin)); // Pin change interrupt control register
 
   uint8_t prevSREG = SREG;
   cli();        // send the character with interrupts disabled
@@ -627,9 +640,9 @@ size_t NeoSWSerial::write(uint8_t txChar)
     uint8_t t0 = TCNTX; // start time
 
     // TODO: This would benefit from an early break after 
-    //    the last 0 data bit.  Then we could wait for the
-    //    remaining 1 data bits and stop bit with interrupts 
-    //    re-enabled.
+    // the last 0 data bit. Then we could wait for the
+    // remaining 1 data bits and stop bit with interrupts 
+    // re-enabled.
 
     while (txBit++ < 9) {   // repeat for start bit + 8 data bits
       if (b)      // if bit is set
@@ -641,12 +654,11 @@ size_t NeoSWSerial::write(uint8_t txChar)
       if ((F_CPU == 16000000L) &&
           (width == TICKS_PER_ONE_BIT_WHEN_9600/4) &&
           (txBit & 0x01)) {
-        // The width is 6.5 ticks, so add a tick every other bit
+        // The width is TICKS_PER_ONE_BIT_WHEN_9600/4 = 6.5 ticks, so add a tick every other bit
         width++;  
       }
 
-      // Hold the line for the bit duration
-
+      // Hold the line for the bit duration and in the meantime service the the possible incoming bits
       while ((uint8_t)(TCNTX - t0) < width) {
         // Receive interrupt pending?
         if (PCI_FLAG_REGISTER & PCIbit) {
@@ -663,6 +675,7 @@ size_t NeoSWSerial::write(uint8_t txChar)
                    // Q: would a signed >> pull in a 1?
     }
 
+  // Send stop bit
   *txPort |= txBitMask;   // stop bit is high
   SREG = prevSREG;        // interrupts on for stop bit
   while ((uint8_t)(TCNTX - t0) < width) {
