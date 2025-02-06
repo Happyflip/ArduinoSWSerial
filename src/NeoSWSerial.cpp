@@ -609,6 +609,34 @@ void NeoSWSerial::rxChar( uint8_t c )
 
   #elif defined(ARDUINO_NANO_MATTER)
 
+  // Only ports PA and PB are able to produce interrupts in low power modes (EM2, EM3).
+  // All ports support interrupts in other modes.
+
+  // Arduino pins mapping:
+  // PB -> A0, A1, A2, A6, A7, CLK
+  // PB -> SWCLK, SWDIO, SWV, UART_TX, UART_RX, A4, A5, MISO, MOSI
+
+
+  // Každý interrupt má enable bit v registru GPIO_IEN. Pokud
+  // přijde, nastaví se bit v registru GPIO_IF. Každý interrupt má k sobě přiřazeny 4 piny na každém portu, ze kterých si může vybrat. Nastavením bitu EXTIPSELx v registru GPIO_EXTIPSELL vyberu port, který bude podporovat interrupty a tím zvolím i 4 piny. Mezi názvem interrutu
+  // a čísly pinů je souvislost. Interrupt EXTI0(1,2,3) může být použit s piny 0,1,2,3. Stejně tak EXTI1,2,3. Interrupt EXTI4 - EXTI7 souvisí s piny 4,5,6,7 atd. Abych vybral konkrétní pin pro interrupt, musím do registru GPIO_EXTIPINSELL zapsat číslo base + offset kde:
+  // base = 0 pro EXTI0-EXTI3
+  //      = 4 pro EXTI4-EXTI7 !oni píšou 4 ale pak nevychází vzorec??
+  //      = int(interrupt_number / 4)
+  // offset = pin_number - base 
+
+  // Příklad: Namapovat EXTI5 na pin 7 znamená base 4, offset 3
+
+  // Na jakou hranu bude pin reagovat se nastaví v registrech GPIO_EXTIRISE[n] and GPIO_EXTIFALL[n] -> možné reagovat na obojí.
+
+  // Nastavením EXT[n] sudého bitu v registru GPIO_IEN odstartuji sudou interrupt line a naopak.
+
+  // Pro zapnutí filtrace vstupního signálu zapiš do MODEx field(s) v GPIO_Px_MODEL registru.
+
+  // Jak povolit interrupt:
+  // 1. Povoloti interrupt v registru GPIO_IEN
+
+
   // MARK: TODO assign interrupt vector to function for arduino Matter
 
   #else
