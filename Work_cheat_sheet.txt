@@ -1,0 +1,37 @@
+Available functions for Arduino Nano Matter:
+	getSilabsPortFromArduinoPin
+	getSilabsPinFromArduinoPin
+	GPIOINT_CallbackRegisterExt
+	GPIOINT_CallbackUnRegister
+	digitalPinToInterrupt
+	GPIO_PinModeSet
+	pinToPinName
+	analogRead
+	analogWrite
+	digitalRead
+	digitalWrite
+	pinMode
+	millis
+	micros
+	delay
+
+Missing functions for Arduino Nano Matter:
+digitalPinToBitMask // returns the bitmask of a specified pin (A0, B5..).
+digitalPinToPort // returns the port (PB, PD...) of a specified pin (A0, B5..) 
+portInputRegister // returns an input port register of the specified port => PIND, PINB, PINC..., this register contains input values
+portOutputRegister // returns an output port register of the specified port.
+digitalPinToPCMSK // quickly get the proper register (PCMSK0, PCMSK1, or PCMSK2) given the number of the Arduino pin. PCMSKx -> controls which pin from specific port can produce interrupt
+digitalPinToPCICR // quickly get the proper register PCICR -> Enable interrupts for bunch of pins (port) containing rxPin
+cli(); // Clear interrupt global enable flag bit (disable all interrupts).
+sei() // Set interrupt global enable flag bit (re-enable interrupts after being disabled).
+
+Missing functions for Arduino Nano Matter:
+SREG // SREG is the processor Status REGister. Global Interrupt Enable bit, carry and zero bit and so on... 
+TCNT0
+PCI_FLAG_REGISTER // Pin Change interrupt flag register
+
+Files where to inspire about:
+ - AppData\Local\Arduino15\packages\SiliconLabs\hardware\silabs\2.2.0
+Interrupts -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\Interrupt.cpp
+Pin to... -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\pinToIndex.cpp
+Pin mapping -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\pinDefinitions.h
