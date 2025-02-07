@@ -1,3 +1,5 @@
+This is fork from NeoSWSerial. I will try to add Arduino Nano Matter support. Work in progress, you can contribute!
+
 The **NeoSWSerial** class is intended as an more-efficient drop-in replacement for the Arduino built-in class `SoftwareSerial`.  If you could use `Serial`, `Serial1`, `Serial2` or `Serial3`, you should use [NeoHWSerial](https://github.com/SlashDevin/NeoHWSerial) instead.  If you could use an Input Capture pin (ICP1, pins 8 & 9 on an UNO), you should consider  [NeoICSerial](https://github.com/SlashDevin/NeoICSerial) instead.
 
 **NeoSWSerial** is limited to four baud rates: 9600 (default), 19200, 31250 (MIDI) and 38400.
