@@ -16,10 +16,10 @@ Available functions for Arduino Nano Matter:
 	delay
 
 Missing functions for Arduino Nano Matter:
-digitalPinToBitMask // returns the bitmask of a specified pin (A0, B5..).
-digitalPinToPort // returns the port (PB, PD...) of a specified pin (A0, B5..) 
-portInputRegister // returns an input port register of the specified port => PIND, PINB, PINC..., this register contains input values
-portOutputRegister // returns an output port register of the specified port.
+Added: digitalPinToBitMask // returns the bitmask of a specified pin (A0, D5..)
+Added: digitalPinToPort // returns the port (PB, PD...) of a specified pin (A0, D5..) 
+Added: portInputRegister // returns an input port register of the specified port => PD, PB, PC..., this register contains input values
+Added: portOutputRegister // returns an output port register of the specified port.
 digitalPinToPCMSK // quickly get the proper register (PCMSK0, PCMSK1, or PCMSK2) given the number of the Arduino pin. PCMSKx -> controls which pin from specific port can produce interrupt
 digitalPinToPCICR // quickly get the proper register PCICR -> Enable interrupts for bunch of pins (port) containing rxPin
 cli(); // Clear interrupt global enable flag bit (disable all interrupts).

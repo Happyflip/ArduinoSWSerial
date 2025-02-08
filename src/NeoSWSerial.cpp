@@ -32,6 +32,7 @@
 //=============================================================================
 
 #include <NeoSWSerial.h>
+#include <NanoMatterPatches.h>
 
 // Default baud rate is 9600
 static const uint8_t TICKS_PER_ONE_BIT_WHEN_9600 = (uint8_t) 26; // How many 4us ticks (x) has to elapse to transmit one bit during 9 600 Baud
@@ -82,8 +83,8 @@ static uint8_t rxBuffer[RX_BUFFER_SIZE];
 static uint8_t rxHead;   // buffer pointer input
 static uint8_t rxTail;   // buffer pointer output
 
-static          uint8_t rxBitMask, txBitMask; // port bit masks
-static volatile uint8_t *txPort;  // port register
+static          uint16_t rxBitMask, txBitMask; // port bit masks
+static volatile uint16_t *txPort;  // port register
 
 //#define DEBUG_NEOSWSERIAL
 #ifdef DEBUG_NEOSWSERIAL
@@ -116,9 +117,6 @@ static volatile uint8_t *txPort;  // port register
   #define DBG_NSS_ARRAY(a,i,v)
 
 #endif
-
-// MACROS MISSING FOR ARDUINO MATTER
-#define _BV(bit) (1 << (bit))
 
 static uint16_t mul8x8to16(uint8_t x, uint8_t y)
 {return x*y;}
