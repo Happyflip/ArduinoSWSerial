@@ -185,7 +185,12 @@ void NeoSWSerial::listen()
     #endif
   }
 
+  #if defined(ARDUINO_NANO_MATTER)
+  // MARK: Different implementation for Nano Matter
+  #else
   volatile uint8_t *pcmsk = digitalPinToPCMSK(rxPin); // PCMSKx -> controls which pin from specific port can produce interrupt
+  #endif
+
   if (pcmsk) { // if interrupt on some pin is enabled
     rxState  = WAITING_FOR_START_BIT;
     rxHead   = rxTail = 0;    // no characters in buffer
@@ -220,8 +225,10 @@ void NeoSWSerial::listen()
         break;
     }
 
-    // Enable the pin change interrupts
-
+    // Enable the pin change interrupts in block protected against interrupts
+    #if defined(ARDUINO_NANO_MATTER)
+    // MARK: Different implementation for Nano Matter
+    #else
     uint8_t prevSREG = SREG;
     cli(); // Clear interrupt global enable flag bit (disable all interrupts).
     {
@@ -230,6 +237,7 @@ void NeoSWSerial::listen()
       listener = this;
     }
     SREG = prevSREG;
+    #endif 
   }
 
 } // listen
@@ -249,6 +257,10 @@ void NeoSWSerial::ignore()
   // Pin Change Interrupts share an ISR between all the pins on a port (port B, C, and D).  And anytime a pin changes on that port, 
   // it calls the port’s ISR which must then decide which pin caused the interrupt.
   if (listener) {
+
+    #if defined(ARDUINO_NANO_MATTER)
+    // MARK: Different implementation for Nano Matter
+    #else
     volatile uint8_t *pcmsk = digitalPinToPCMSK(rxPin); // PCMSKx -> controls which pin from specific port can produce interrupt
 
     // SREG is the processor Status REGister. Global Interrupt Enable bit, carry and zero bit and so on... Save it.
@@ -265,6 +277,7 @@ void NeoSWSerial::ignore()
       }
     }
     SREG = prevSREG; // Restore Status register
+    #endif 
   }
 
 } // ignore
@@ -307,12 +320,17 @@ int NeoSWSerial::available()
   // Even when there is not new char saved in the buffer, all bits could arrive,
   // but because all of them were ones, it didnt trigger saving mechanism -> check this edge case.
   if (avail == 0) { 
+    #if defined(ARDUINO_NANO_MATTER)
+    // MARK: Different implementation for Nano Matter
+    #else
     cli(); //  Disable all interrupts - Clear interrupt global enable flag
       if (checkRxTime()) {
         avail = 1;
         DBG_NSS_COUNT(availCompletions);
       }
     sei(); // Set interrupt global enable flag bit (re-enable interrupts after being disabled).
+    #endif 
+    
   }
 
   return avail;
@@ -347,10 +365,14 @@ int NeoSWSerial::read()
  */
 void NeoSWSerial::attachInterrupt( isr_t fn )
 {
+  #if defined(ARDUINO_NANO_MATTER)
+  // MARK: Different implementation for Nano Matter
+  #else
   uint8_t oldSREG = SREG; // save status register
   cli(); // disable global interrupts
-    _isr = fn;
+  _isr = fn;
   SREG = oldSREG; // Restore status register
+  #endif 
 
 } // attachInterrupt
 
@@ -615,14 +637,17 @@ void NeoSWSerial::rxChar( uint8_t c )
   // PB -> SWCLK, SWDIO, SWV, UART_TX, UART_RX, A4, A5, MISO, MOSI
 
 
-  // Každý interrupt má enable bit v registru GPIO_IEN. Pokud
-  // přijde, nastaví se bit v registru GPIO_IF. Každý interrupt má k sobě přiřazeny 4 piny na každém portu, ze kterých si může vybrat. Nastavením bitu EXTIPSELx v registru GPIO_EXTIPSELL vyberu port, který bude podporovat interrupty a tím zvolím i 4 piny. Mezi názvem interrutu
-  // a čísly pinů je souvislost. Interrupt EXTI0(1,2,3) může být použit s piny 0,1,2,3. Stejně tak EXTI1,2,3. Interrupt EXTI4 - EXTI7 souvisí s piny 4,5,6,7 atd. Abych vybral konkrétní pin pro interrupt, musím do registru GPIO_EXTIPINSELL zapsat číslo base + offset kde:
+  // Každý interrupt má enable bit v registru GPIO_IEN. Pokud přijde, nastaví se bit v registru GPIO_IF. 
+  // Každý interrupt má k sobě přiřazeny 4 piny na každém portu, ze kterých si může vybrat. 
+  // Nastavením bitu EXTIPSELx (External Interrupt Port Selection) v registru GPIO_EXTIPSELL vyberu port, který bude podporovat interrupty a tím zvolím i 4 piny.
+  // Mezi názvem interruptu a čísly pinů je souvislost. Interrupt EXTI0 může být použit s piny 0,1,2,3. Stejně tak EXTI(1,2,3).
+  // Interrupt EXTI4 - EXTI7 souvisí s piny 4,5,6,7 atd. 
+  // Abych vybral konkrétní pin pro interrupt, musím do registru GPIO_EXTIPINSELL (External Interrupt Pin Selection) zapsat offset který vypočtu jako:
+  // offset = pin_number - base
   // base = 0 pro EXTI0-EXTI3
-  //      = 4 pro EXTI4-EXTI7 !oni píšou 4 ale pak nevychází vzorec??
-  //      = int(interrupt_number / 4)
-  // offset = pin_number - base 
-
+  //      = 4 pro EXTI4-EXTI7
+  //      = 4 * int(interrupt_number/4)
+  
   // Příklad: Namapovat EXTI5 na pin 7 znamená base 4, offset 3
 
   // Na jakou hranu bude pin reagovat se nastaví v registrech GPIO_EXTIRISE[n] and GPIO_EXTIFALL[n] -> možné reagovat na obojí.
@@ -631,8 +656,33 @@ void NeoSWSerial::rxChar( uint8_t c )
 
   // Pro zapnutí filtrace vstupního signálu zapiš do MODEx field(s) v GPIO_Px_MODEL registru.
 
-  // Jak povolit interrupt:
-  // 1. Povoloti interrupt v registru GPIO_IEN
+  // Po interruptu je třeba smazat interrupt flag v GPIO_IF registru, dělá se to zápisem do GPIO_IF_CLR. Přímý zápis nemá vliv.
+
+  // Více o interruptech v EFR32xG24 Wireless SoC Reference Manual, stránka 37 -> Interrupt operation.
+
+  // How to enable interrupt on pin in ATMEL:
+  // 1. Set I-bit (bit 7) in SREG (AVR Status Register)  -> I-bit = Enable Global Interrupt. The I-bit is cleared by hardware after an interrupt
+  //    has occurred and restored by RETI instruction on the end. The I-bit can also be set and cleared by the application with the SEI and CLI instructions.
+  // 2. Set PCIEx bit in PCICR (Pin Change Interrupt Control Register) -> Enable interrupts for bunch of pins (port), but still not enough to fire...
+  // 3. Set PCINTy bit in PCMSKx register -> controls which pin (y) from enabled bunch of pins (port) can produce interrupt
+
+
+  // How to enable interrupt on pin in ARM(SiliconLabs):
+  // 1. Set EXTIPSELx (External Interrupt Port Selection) bit in the GPIO_EXTIPSELL register -> enable 4 pins on specific port to generate interrupts
+  // EXTIPSEL0 = Port select for external interrupt 0 (EXTI0) and EXTI0 could be used with a pins 0,1,2,3
+  // EXTIPSEL1 = Port select for external interrupt 1 (EXTI1) and EXTI1 could be used with a pins 0,1,2,3
+  // .......
+  // EXTIPSEL3 = Port select for external interrupt 1 (EXTI1) and EXTI1 could be used with a pins 0,1,2,3
+  // EXTIPSEL4 = Port select for external interrupt 4 (EXTI4) and EXTI4 could be used with a pins 4,5,6,7
+  // ....
+  // EXTIPSEL7 = Port select for external interrupt 7 (EXTI7) and EXTI7 could be used with a pins 4,5,6,7
+  // ....
+  // 2. Select specific pin by writing OFFSET to GPIO_EXTIPINSELL (External Interrupt Pin Selection) register where:
+  // offset = pin_number - BASE
+  //    BASE = 0 for EXTI0-EXTI3
+  //         = 4 pro EXTI4-EXTI7
+  //         = 4 * int(interrupt_number/4)
+
 
 
   // MARK: TODO assign interrupt vector to function for arduino Matter
@@ -658,6 +708,11 @@ size_t NeoSWSerial::write(uint8_t txChar)
   uint8_t width;         // ticks for one bit
   uint8_t txBit  = 0;    // first bit is start bit
   uint8_t b      = 0;    // start bit is low
+
+  #if defined(ARDUINO_NANO_MATTER)
+  // MARK: Different implementation for Nano Matter
+  #else
+
   uint8_t PCIbit = bit(digitalPinToPCICRbit(rxPin)); // Pin change interrupt control register
 
   uint8_t prevSREG = SREG;
@@ -708,6 +763,8 @@ size_t NeoSWSerial::write(uint8_t txChar)
     if (checkRxTime())
       DBG_NSS_COUNT(stopBitCompletions);
   }
+
+  #endif 
 
   return 1;               // 1 character sent
 
