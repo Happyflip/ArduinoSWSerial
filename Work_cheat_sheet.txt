@@ -56,7 +56,7 @@ cli() // Clear interrupt global enable flag bit (disable all interrupts).
     
     /* Do some stuff here which can be interrupted */
 	}
-	-> Why so is so complicated to disable interrupts:
+	-> Why is so complicated to disable interrupts:
 	If interrupts were enabled and something interrupts you between the __get_PRIMASK() and the __disable_irq()
 	and disables IRQs itself, it will restore conditions before it finishes so my 'old_primask' variable will still be valid."
 
@@ -70,5 +70,5 @@ PCI_FLAG_REGISTER // Pin Change interrupt flag register
 Files where to inspire about:
  - AppData\Local\Arduino15\packages\SiliconLabs\hardware\silabs\2.2.0
 Interrupts -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\Interrupt.cpp
-Pin to... -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\pinToIndex.cpp
+Pin to... -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\pinToIndex.cpp, SiliconLabsSrc\variants\nano_matter\pins_arduino.h
 Pin mapping -> 	Kody\NeoSWSerial\SiliconLabsSrc\cores\silabs\pinDefinitions.h

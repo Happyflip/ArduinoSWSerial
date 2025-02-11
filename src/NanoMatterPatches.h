@@ -54,6 +54,11 @@
 #define SERIAL_TX PC4 // Serial Tx
 #define SERIAL_RX PC5 // Serial Rx - WU
 
+// MARK: TODO - there are now 3 files which do the pin mapping, this one,
+// SiliconLabsSrc\cores\silabs\pinDefinitions.h
+// and SiliconLabsSrc\variants\nano_matter\pins_arduino.h
+// How this mapping hell works??
+
 
 // returns port bit number for Arduino pin (D0, D5, A0 or PB0, PC1... or 0, 1, 2...)
 #define arduinoPinToPortBit(arduino_pin) (pinToPinName(arduino_pin) - PIN_NAME_MIN) % 16
@@ -72,9 +77,6 @@
 
 // returns an output port register of the specified port (1(PB), 3(PD)...), this register contains output values
 #define portOutputRegister(port_number) ((volatile uint32_t *) &GPIO->P[port_number].DOUT) 
- 
-
-
 
 #endif // NANOMATTERPATCHES_H
 

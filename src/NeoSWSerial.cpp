@@ -34,6 +34,8 @@
 #include <NeoSWSerial.h>
 #include <NanoMatterPatches.h>
 
+#define ARDUINO_NANO_MATTER // MARK: Remove later
+
 // Default baud rate is 9600
 static const uint8_t TICKS_PER_ONE_BIT_WHEN_9600 = (uint8_t) 26; // How many 4us ticks (x) has to elapse to transmit one bit during 9 600 Baud
                               // Transfer one bit (no matter if status or data bit) when there is 9 600 bit_changes/s takes 1/9600 s
@@ -627,6 +629,7 @@ void NeoSWSerial::rxChar( uint8_t c )
   PCINT_ISR(0, PINB);
   PCINT_ISR(1, PINE);
 
+
   #elif defined(ARDUINO_NANO_MATTER)
 
   // Only ports PA and PB are able to produce interrupts in low power modes (EM2, EM3).
@@ -682,6 +685,7 @@ void NeoSWSerial::rxChar( uint8_t c )
   //    BASE = 0 for EXTI0-EXTI3
   //         = 4 pro EXTI4-EXTI7
   //         = 4 * int(interrupt_number/4)
+  // 3. Enable interrupt by setting corresponding bit in GPIO_IEN register
 
 
 
